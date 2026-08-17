@@ -1,0 +1,80 @@
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: serviceaccounts.iam.gcp.example.org
+spec:
+  group: iam.gcp.example.org
+  names:
+    kind: ServiceAccount
+    plural: serviceaccounts
+  claimNames:
+    kind: ServiceAccountClaim
+    plural: serviceaccountclaims
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                  description: The ID of the project in which to provision resources.
+                region:
+                  type: string
+                  description: >-
+                    The region in which to provision resources. To stay within
+                    GCP Free Tier, use: us-west1, us-central1, or us-east1.
+                  default: us-central1
+                  enum:
+                    - us-west1
+                    - us-central1
+                    - us-east1
+                accountId:
+                  type: string
+                  description: The account ID of the service account to create.
+                displayName:
+                  type: string
+                  description: The display name for the service account.
+                  default: Crossplane-managed Service Account
+                description:
+                  type: string
+                  description: A text description of the service account.
+                roles:
+                  type: array
+                  items:
+                    type: string
+                  description: >-
+                    IAM roles to bind to the service account. This Composition
+                    provisions up to two role bindings (roles[0] and roles[1]).
+                    For more roles or dynamic maps of service accounts, use the
+                    direct managed resources in examples/.
+              required:
+                - projectId
+                - accountId
+            status:
+              type: object
+              properties:
+                serviceAccountEmail:
+                  type: string
+                  description: The email address of the created service account.
+                serviceAccountId:
+                  type: string
+                  description: The unique ID of the created service account.
+                serviceAccountKeySecretRef:
+                  type: object
+                  description: >-
+                    Reference to the Kubernetes Secret holding the generated
+                    service account key (private key in the `privateKey` key).
+                  properties:
+                    name:
+                      type: string
+                      description: Name of the Kubernetes Secret.
+                    namespace:
+                      type: string
+                      description: Namespace of the Kubernetes Secret.

@@ -1,0 +1,195 @@
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: serviceaccounts.iam.gcp.example.org
+  labels:
+    provider: gcp
+    service: iam
+spec:
+  compositeTypeRef:
+    apiVersion: iam.gcp.example.org/v1alpha1
+    kind: ServiceAccount
+  resources:
+    - name: service-account
+      base:
+        apiVersion: iam.gcp.upbound.io/v1beta1
+        kind: ServiceAccount
+        spec:
+          forProvider:
+            displayName: Crossplane-managed Service Account
+          providerConfigRef:
+            name: gcp-provider-config
+      patches:
+        # The GCP account ID is the external name of the managed resource, so
+        # the Kubernetes name is patched directly from the claim's accountId.
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.accountId
+          toFieldPath: metadata.name
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.projectId
+          toFieldPath: spec.forProvider.project
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.displayName
+          toFieldPath: spec.forProvider.displayName
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.description
+          toFieldPath: spec.forProvider.description
+        # Publish outputs back to the composite resource status so that
+        # consumers can read the service account email and unique ID.
+        - type: ToCompositeFieldPath
+          fromFieldPath: status.atProvider.email
+          toFieldPath: status.serviceAccountEmail
+        - type: ToCompositeFieldPath
+          fromFieldPath: status.atProvider.uniqueId
+          toFieldPath: status.serviceAccountId
+      readinessChecks:
+        - type: MatchString
+          fieldPath: status.atProvider.id
+          matchString: ".*"
+    - name: role-binding-1
+      base:
+        apiVersion: iam.gcp.upbound.io/v1beta1
+        kind: ProjectIAMMember
+        spec:
+          forProvider:
+            project: ""
+            role: ""
+            member: ""
+          providerConfigRef:
+            name: gcp-provider-config
+      patches:
+        - type: CombineFromComposite
+          combine:
+            variables:
+              - fromFieldPath: metadata.labels[crossplane.io/claim-namespace]
+              - fromFieldPath: metadata.labels[crossplane.io/claim-name]
+            strategy: string
+            string:
+              fmt: "%s-%s-role-0"
+          toFieldPath: metadata.name
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.projectId
+          toFieldPath: spec.forProvider.project
+        # The member uses the standard "serviceAccount:<email>" format.
+        - type: CombineFromComposite
+          combine:
+            variables:
+              - fromFieldPath: spec.accountId
+              - fromFieldPath: spec.projectId
+            strategy: string
+            string:
+              fmt: "serviceAccount:%s@%s.iam.gserviceaccount.com"
+          toFieldPath: spec.forProvider.member
+        # The Composition is a fixed example that binds up to two roles
+        # (roles[0] and roles[1]). Role bindings beyond the second are not
+        # created by this Composition.
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.roles[0]
+          toFieldPath: spec.forProvider.role
+          policy:
+            fromFieldPath: Optional
+      readinessChecks:
+        - type: MatchString
+          fieldPath: status.atProvider.id
+          matchString: ".*"
+    - name: role-binding-2
+      base:
+        apiVersion: iam.gcp.upbound.io/v1beta1
+        kind: ProjectIAMMember
+        spec:
+          forProvider:
+            project: ""
+            role: ""
+            member: ""
+          providerConfigRef:
+            name: gcp-provider-config
+      patches:
+        - type: CombineFromComposite
+          combine:
+            variables:
+              - fromFieldPath: metadata.labels[crossplane.io/claim-namespace]
+              - fromFieldPath: metadata.labels[crossplane.io/claim-name]
+            strategy: string
+            string:
+              fmt: "%s-%s-role-1"
+          toFieldPath: metadata.name
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.projectId
+          toFieldPath: spec.forProvider.project
+        - type: CombineFromComposite
+          combine:
+            variables:
+              - fromFieldPath: spec.accountId
+              - fromFieldPath: spec.projectId
+            strategy: string
+            string:
+              fmt: "serviceAccount:%s@%s.iam.gserviceaccount.com"
+          toFieldPath: spec.forProvider.member
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.roles[1]
+          toFieldPath: spec.forProvider.role
+          policy:
+            fromFieldPath: Optional
+      readinessChecks:
+        - type: MatchString
+          fieldPath: status.atProvider.id
+          matchString: ".*"
+    - name: service-account-key
+      base:
+        apiVersion: iam.gcp.upbound.io/v1beta1
+        kind: ServiceAccountKey
+        spec:
+          forProvider:
+            publicKeyType: TYPE_X509_PEM_FILE
+          writeConnectionSecretToRef:
+            name: ""
+            namespace: ""
+          providerConfigRef:
+            name: gcp-provider-config
+      patches:
+        - type: CombineFromComposite
+          combine:
+            variables:
+              - fromFieldPath: metadata.labels[crossplane.io/claim-namespace]
+              - fromFieldPath: metadata.labels[crossplane.io/claim-name]
+            strategy: string
+            string:
+              fmt: "%s-%s-sa-key"
+          toFieldPath: metadata.name
+        # The key references the service account by its full resource name.
+        - type: CombineFromComposite
+          combine:
+            variables:
+              - fromFieldPath: spec.projectId
+              - fromFieldPath: spec.accountId
+              - fromFieldPath: spec.projectId
+            strategy: string
+            string:
+              fmt: "projects/%s/serviceAccounts/%s@%s.iam.gserviceaccount.com"
+          toFieldPath: spec.forProvider.serviceAccountId
+        # The provider writes connection details (including the private key)
+        # to the secret referenced by writeConnectionSecretToRef.
+        - type: CombineFromComposite
+          combine:
+            variables:
+              - fromFieldPath: metadata.labels[crossplane.io/claim-namespace]
+              - fromFieldPath: metadata.labels[crossplane.io/claim-name]
+            strategy: string
+            string:
+              fmt: "%s-%s-sa-key"
+          toFieldPath: spec.writeConnectionSecretToRef.name
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.labels[crossplane.io/claim-namespace]
+          toFieldPath: spec.writeConnectionSecretToRef.namespace
+        # Publish the connection secret reference back to the composite status.
+        - type: ToCompositeFieldPath
+          fromFieldPath: spec.writeConnectionSecretToRef.name
+          toFieldPath: status.serviceAccountKeySecretRef.name
+        - type: ToCompositeFieldPath
+          fromFieldPath: spec.writeConnectionSecretToRef.namespace
+          toFieldPath: status.serviceAccountKeySecretRef.namespace
+      readinessChecks:
+        - type: MatchString
+          fieldPath: status.atProvider.id
+          matchString: ".*"
