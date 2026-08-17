@@ -1,0 +1,21 @@
+---
+# Example claim. Replace the placeholder values (or use the CI/CD workflow
+# which substitutes them automatically).
+#
+# This Composition is a fixed example: it provisions ONE service account, up
+# to TWO IAM role bindings (roles[0] and roles[1]), and a service account key
+# whose private key is written to a Kubernetes Secret.
+apiVersion: iam.gcp.example.org/v1alpha1
+kind: ServiceAccountClaim
+metadata:
+  name: CLAIM_NAME
+  namespace: CLAIM_NAMESPACE
+spec:
+  projectId: PROJECT_ID
+  region: REGION
+  accountId: ACCOUNT_ID
+  displayName: DISPLAY_NAME
+  description: DESCRIPTION
+  roles:
+    - ROLE_0
+    - ROLE_1
