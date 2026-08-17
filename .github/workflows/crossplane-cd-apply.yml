@@ -1,0 +1,135 @@
+---
+name: CD - GCP Service Accounts (Apply)
+
+on:
+  workflow_dispatch:
+    inputs:
+
+      project_id:
+        description: GCP project ID
+        required: true
+        type: string
+
+      region:
+        description: "GCP region (Free Tier: us-west1, us-central1, us-east1)"
+        required: true
+        type: string
+        default: us-central1
+
+      claim_name:
+        description: "Claim name. Creates a service account with role bindings"
+        required: true
+        type: string
+
+      claim_namespace:
+        description: Namespace for the claim
+        required: true
+        type: string
+        default: default
+
+      account_id:
+        description: "Account ID of the service account"
+        required: true
+        type: string
+
+      display_name:
+        description: Display name of the service account
+        required: true
+        type: string
+
+      description:
+        description: Description of the service account
+        required: true
+        type: string
+
+      role_0:
+        description: "First IAM role to bind (roles[0])"
+        required: true
+        type: string
+
+      role_1:
+        description: "Second IAM role to bind (roles[1])"
+        required: true
+        type: string
+
+jobs:
+  apply:
+    name: Crossplane Apply
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 --decode > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+
+      - name: Install Crossplane Provider
+        run: kubectl apply -f provider/provider.yaml
+
+      - name: Wait for Provider
+        run: |
+          kubectl wait --for=condition=Healthy \
+            provider/upbound-provider-gcp-iam --timeout=300s
+
+      - name: Create GCP credentials secret
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          kubectl create secret generic gcp-creds \
+            --namespace crossplane-system \
+            --from-file=creds=<(printf '%s' "$GCP_SA_KEY") \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply ProviderConfig
+        run: |
+          sed -e "s/PROJECT_ID/${{ github.event.inputs.project_id }}/g" \
+            provider/provider-config.yaml | kubectl apply -f -
+
+      - name: Apply XRD and Composition
+        run: |
+          kubectl apply -f composition/xrd.yaml
+          kubectl apply -f composition/composition.yaml
+
+      - name: Apply Claim
+        run: |
+          sed -e "s/PROJECT_ID/${{ github.event.inputs.project_id }}/g" \
+            -e "s/REGION/${{ github.event.inputs.region }}/g" \
+            -e "s/CLAIM_NAME/${{ github.event.inputs.claim_name }}/g" \
+            -e "s/CLAIM_NAMESPACE/${{ github.event.inputs.claim_namespace }}/g" \
+            -e "s/ACCOUNT_ID/${{ github.event.inputs.account_id }}/g" \
+            -e "s/DISPLAY_NAME/${{ github.event.inputs.display_name }}/g" \
+            -e "s/DESCRIPTION/${{ github.event.inputs.description }}/g" \
+            -e "s/ROLE_0/${{ github.event.inputs.role_0 }}/g" \
+            -e "s/ROLE_1/${{ github.event.inputs.role_1 }}/g" \
+            composition/claim.yaml | kubectl apply -f -
+
+      - name: Wait for Service Account Ready
+        run: |
+          kubectl wait --for=condition=Ready \
+            serviceaccountclaims.iam.gcp.example.org/${{ github.event.inputs.claim_name }} \
+            --namespace ${{ github.event.inputs.claim_namespace }} --timeout=300s
+
+      - name: Show Service Account Details
+        run: |
+          kubectl get serviceaccountclaims.iam.gcp.example.org \
+            ${{ github.event.inputs.claim_name }} \
+            --namespace ${{ github.event.inputs.claim_namespace }} \
+            -o jsonpath='Email: {.status.serviceAccountEmail}{"\n"}'
+          kubectl get serviceaccountclaims.iam.gcp.example.org \
+            ${{ github.event.inputs.claim_name }} \
+            --namespace ${{ github.event.inputs.claim_namespace }} \
+            -o jsonpath='Unique ID: {.status.serviceAccountId}{"\n"}'
+          kubectl get serviceaccountclaims.iam.gcp.example.org \
+            ${{ github.event.inputs.claim_name }} \
+            --namespace ${{ github.event.inputs.claim_namespace }} \
+            -o jsonpath='Key Secret: {.status.serviceAccountKeySecretRef.name}{"\n"}'
+          kubectl get serviceaccountclaims.iam.gcp.example.org \
+            ${{ github.event.inputs.claim_name }} \
+            --namespace ${{ github.event.inputs.claim_namespace }} \
+            -o jsonpath='Key namespace: {.status.serviceAccountKeySecretRef.namespace}{"\n"}'
